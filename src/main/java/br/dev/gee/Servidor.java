@@ -1,13 +1,27 @@
 package br.dev.gee;
 
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.time.Instant;
+import java.util.HashMap;
 import java.util.Scanner;
 
 public class Servidor {
+    public static class TimestampedValue<T> {
+        public final long timestamp;
+        public final T value;
+
+        public TimestampedValue(T value) {
+            this.timestamp = Instant.now().toEpochMilli();
+            this.value = value;
+        }
+    }
+
     public static final InetAddress DEFAULT_ADDRESS;
     static {
         try {
@@ -49,13 +63,52 @@ public class Servidor {
         scanner.close();
 
         final ServerSocket serverSocket = new ServerSocket(selfPort, -1, selfAddress);
+        final HashMap<String, TimestampedValue<String>> data = new HashMap<>();
 
         // É líder
         if (selfAddress == leaderAddress && selfPort == leaderPort) {
             while (!serverSocket.isClosed()) {
                 final Socket clientSocket = serverSocket.accept();
                 new Thread(() -> {
-                    // TODO: Leader implementation
+                    try (
+                            final ObjectInputStream in = new ObjectInputStream(clientSocket.getInputStream());
+                            final ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
+                    ) {
+                        while (!clientSocket.isClosed()) {
+                            Mensagem msg = (Mensagem) in.readObject();
+                            switch (msg.code) {
+                                case PUT:
+                                    synchronized (data) {
+                                        final TimestampedValue<String> timestampedValue = new TimestampedValue<>(msg.value);
+                                        data.put(msg.key, timestampedValue);
+                                        out.writeObject(new Mensagem(
+                                                Mensagem.Code.PUT_OK,
+                                                msg.key,
+                                                null,
+                                                timestampedValue.timestamp
+                                        ));
+                                    }
+                                    break;
+                                case GET:
+                                    synchronized (data) {
+                                        final TimestampedValue<String> timestampedValue = data.getOrDefault(msg.key, null);
+                                        final String value = (timestampedValue != null && timestampedValue.timestamp >= msg.timestamp)?
+                                                timestampedValue.value : null;
+                                        final long timestamp = (value != null)?
+                                                timestampedValue.timestamp : msg.timestamp;
+                                        out.writeObject(new Mensagem(
+                                                Mensagem.Code.GET,
+                                                msg.key,
+                                                value,
+                                                timestamp
+                                        ));
+                                    }
+                                default:
+                            }
+                        }
+                    } catch (IOException | ClassNotFoundException exception) {
+                        throw new RuntimeException(exception);
+                    }
                 }).start();
             }
             return;
