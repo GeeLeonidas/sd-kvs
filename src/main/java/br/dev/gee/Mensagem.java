@@ -9,9 +9,9 @@ public class Mensagem implements Serializable {
         GET, TRY_OTHER_SERVER_OR_LATER
     }
 
-    final Code code;
-    final String key, value;
-    final Long timestamp;
+    public final Code code;
+    public final String key, value;
+    public final long timestamp;
 
     public Mensagem(Code code, String key, String value, long timestamp) {
         this.code = code;
