@@ -132,25 +132,24 @@ public class Servidor {
                                         data.put(msg.key, timestampedValue);
                                     }
                                     new Thread(() -> {
-                                        synchronized (data) {
-                                            while (true) {
-                                                try {
-                                                    Thread.sleep(1);
-                                                } catch (InterruptedException ignored) {}
-                                                synchronized (nonLeadersOutdatedKeys) {
-                                                    boolean shouldQuit = true;
-                                                    for (NetworkInfo serverInfo : nonLeadersOutdatedKeys.keySet()) {
-                                                        ArrayList<String> list = nonLeadersOutdatedKeys.get(serverInfo);
-                                                        if (!list.isEmpty() && list.contains(msg.key))
-                                                            shouldQuit = false;
-                                                    }
-                                                    if (shouldQuit)
-                                                        break;
-                                                }
-                                            }
-
+                                        while (true) {
                                             try {
-                                                synchronized (out) {
+                                                Thread.sleep(1);
+                                            } catch (InterruptedException ignored) {}
+                                            synchronized (nonLeadersOutdatedKeys) {
+                                                boolean shouldQuit = true;
+                                                for (NetworkInfo serverInfo : nonLeadersOutdatedKeys.keySet()) {
+                                                    ArrayList<String> list = nonLeadersOutdatedKeys.get(serverInfo);
+                                                    if (!list.isEmpty() && list.contains(msg.key))
+                                                        shouldQuit = false;
+                                                }
+                                                if (shouldQuit)
+                                                    break;
+                                            }
+                                        }
+                                        try {
+                                            synchronized (out) {
+                                                synchronized (data) {
                                                     out.writeObject(new Mensagem(
                                                             Mensagem.Code.PUT_OK,
                                                             msg.key,
@@ -158,9 +157,9 @@ public class Servidor {
                                                             data.get(msg.key).timestamp
                                                     ));
                                                 }
-                                            } catch (IOException exception) {
-                                                throw new RuntimeException(exception);
                                             }
+                                        } catch (IOException exception) {
+                                            throw new RuntimeException(exception);
                                         }
                                     }).start();
                                     break;
