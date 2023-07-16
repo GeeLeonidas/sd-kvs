@@ -8,6 +8,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Scanner;
 
@@ -19,6 +20,21 @@ public class Servidor {
         public TimestampedValue(T value) {
             this.timestamp = Instant.now().toEpochMilli();
             this.value = value;
+        }
+    }
+
+    public static class NetworkInfo {
+        public final InetAddress address;
+        public final int port;
+
+        public NetworkInfo(InetAddress address, int port) {
+            this.address = address;
+            this.port = port;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("%s:%d", this.address.getHostAddress(), this.port);
         }
     }
 
@@ -66,18 +82,52 @@ public class Servidor {
         final HashMap<String, TimestampedValue<String>> data = new HashMap<>();
 
         // É líder
-        if (selfAddress == leaderAddress && selfPort == leaderPort) {
+        if (selfAddress.equals(leaderAddress) && selfPort == leaderPort) {
+            final ArrayList<NetworkInfo> nonLeaders = new ArrayList<>();
+            final HashMap<NetworkInfo, ArrayList<String>> nonLeadersOutdatedKeys = new HashMap<>();
+            final HashMap<NetworkInfo, ArrayList<String>> nonLeadersToSendReplication = new HashMap<>();
+
             while (!serverSocket.isClosed()) {
                 final Socket clientSocket = serverSocket.accept();
                 new Thread(() -> {
                     try (
                             final ObjectInputStream in = new ObjectInputStream(clientSocket.getInputStream());
-                            final ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
+                            final ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream())
                     ) {
+                        final NetworkInfo info = new NetworkInfo(clientSocket.getInetAddress(), clientSocket.getPort());
+                        final Mensagem firstMsg = (Mensagem) in.readObject();
+                        if (firstMsg.code == Mensagem.Code.SERVER_HERE) {
+                            synchronized (nonLeaders) {
+                                nonLeaders.add(info);
+                            }
+                            synchronized (nonLeadersOutdatedKeys) {
+                                nonLeadersOutdatedKeys.put(info, new ArrayList<>());
+                            }
+                            synchronized (nonLeadersToSendReplication) {
+                                nonLeadersToSendReplication.put(info, new ArrayList<>());
+                            }
+                        } else if (firstMsg.code != Mensagem.Code.CLIENT_HERE)
+                            return;
+
                         while (!clientSocket.isClosed()) {
-                            Mensagem msg = (Mensagem) in.readObject();
+                            final Mensagem msg = (Mensagem) in.readObject();
                             switch (msg.code) {
                                 case PUT:
+                                    synchronized (nonLeaders) {
+                                        for (NetworkInfo nonLeader : nonLeaders) {
+                                            synchronized (nonLeadersOutdatedKeys) {
+                                                ArrayList<String> list = nonLeadersOutdatedKeys.get(nonLeader);
+                                                list.add(msg.key);
+                                                nonLeadersOutdatedKeys.put(nonLeader, list);
+                                            }
+                                            synchronized (nonLeadersToSendReplication) {
+                                                final ArrayList<String> list = nonLeadersToSendReplication.get(nonLeader);
+                                                list.add(msg.key);
+                                                nonLeadersToSendReplication.put(nonLeader, list);
+                                            }
+                                        }
+                                    }
+                                    // TODO: Block PUT_OK until nonLeadersOutdatedKeys doesn't have msg.key anymore
                                     synchronized (data) {
                                         final TimestampedValue<String> timestampedValue = new TimestampedValue<>(msg.value);
                                         data.put(msg.key, timestampedValue);
@@ -103,7 +153,34 @@ public class Servidor {
                                                 timestamp
                                         ));
                                     }
+                                    break;
+                                case REPLICATION_OK:
+                                    if (firstMsg.code == Mensagem.Code.CLIENT_HERE)
+                                        break;
+                                    synchronized (nonLeadersOutdatedKeys) {
+                                        final ArrayList<String> list = nonLeadersOutdatedKeys.get(info);
+                                        list.remove(msg.key);
+                                        nonLeadersOutdatedKeys.put(info, list);
+                                    }
                                 default:
+                            }
+                            synchronized (nonLeadersToSendReplication) {
+                                final ArrayList<String> list = nonLeadersToSendReplication.get(info);
+                                if (firstMsg.code == Mensagem.Code.SERVER_HERE && !list.isEmpty()) {
+                                    for (String key : list) {
+                                        synchronized (data) {
+                                            TimestampedValue<String> entry = data.get(key);
+                                            out.writeObject(new Mensagem(
+                                                    Mensagem.Code.REPLICATION,
+                                                    key,
+                                                    entry.value,
+                                                    entry.timestamp
+                                            ));
+                                        }
+                                    }
+                                    list.clear();
+                                    nonLeadersToSendReplication.put(info, list);
+                                }
                             }
                         }
                     } catch (IOException | ClassNotFoundException exception) {

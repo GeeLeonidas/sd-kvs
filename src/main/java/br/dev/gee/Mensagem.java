@@ -4,6 +4,7 @@ import java.io.Serializable;
 
 public class Mensagem implements Serializable {
     public enum Code {
+        SERVER_HERE, CLIENT_HERE,
         PUT, PUT_OK,
         REPLICATION, REPLICATION_OK,
         GET, TRY_OTHER_SERVER_OR_LATER
