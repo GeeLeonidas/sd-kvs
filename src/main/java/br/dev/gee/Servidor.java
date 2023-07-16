@@ -127,17 +127,42 @@ public class Servidor {
                                             }
                                         }
                                     }
-                                    // TODO: Block PUT_OK until nonLeadersOutdatedKeys doesn't have msg.key anymore
                                     synchronized (data) {
                                         final TimestampedValue<String> timestampedValue = new TimestampedValue<>(msg.value);
                                         data.put(msg.key, timestampedValue);
-                                        out.writeObject(new Mensagem(
-                                                Mensagem.Code.PUT_OK,
-                                                msg.key,
-                                                null,
-                                                timestampedValue.timestamp
-                                        ));
                                     }
+                                    new Thread(() -> {
+                                        synchronized (data) {
+                                            while (true) {
+                                                try {
+                                                    Thread.sleep(1);
+                                                } catch (InterruptedException ignored) {}
+                                                synchronized (nonLeadersOutdatedKeys) {
+                                                    boolean shouldQuit = true;
+                                                    for (NetworkInfo serverInfo : nonLeadersOutdatedKeys.keySet()) {
+                                                        ArrayList<String> list = nonLeadersOutdatedKeys.get(serverInfo);
+                                                        if (!list.isEmpty() && list.contains(msg.key))
+                                                            shouldQuit = false;
+                                                    }
+                                                    if (shouldQuit)
+                                                        break;
+                                                }
+                                            }
+
+                                            try {
+                                                synchronized (out) {
+                                                    out.writeObject(new Mensagem(
+                                                            Mensagem.Code.PUT_OK,
+                                                            msg.key,
+                                                            null,
+                                                            data.get(msg.key).timestamp
+                                                    ));
+                                                }
+                                            } catch (IOException exception) {
+                                                throw new RuntimeException(exception);
+                                            }
+                                        }
+                                    }).start();
                                     break;
                                 case GET:
                                     synchronized (data) {
@@ -146,12 +171,14 @@ public class Servidor {
                                                 timestampedValue.value : null;
                                         final long timestamp = (value != null)?
                                                 timestampedValue.timestamp : msg.timestamp;
-                                        out.writeObject(new Mensagem(
-                                                Mensagem.Code.GET,
-                                                msg.key,
-                                                value,
-                                                timestamp
-                                        ));
+                                        synchronized (out) {
+                                            out.writeObject(new Mensagem(
+                                                    Mensagem.Code.GET,
+                                                    msg.key,
+                                                    value,
+                                                    timestamp
+                                            ));
+                                        }
                                     }
                                     break;
                                 case REPLICATION_OK:
@@ -170,12 +197,14 @@ public class Servidor {
                                     for (String key : list) {
                                         synchronized (data) {
                                             TimestampedValue<String> entry = data.get(key);
-                                            out.writeObject(new Mensagem(
-                                                    Mensagem.Code.REPLICATION,
-                                                    key,
-                                                    entry.value,
-                                                    entry.timestamp
-                                            ));
+                                            synchronized (out) {
+                                                out.writeObject(new Mensagem(
+                                                        Mensagem.Code.REPLICATION,
+                                                        key,
+                                                        entry.value,
+                                                        entry.timestamp
+                                                ));
+                                            }
                                         }
                                     }
                                     list.clear();
