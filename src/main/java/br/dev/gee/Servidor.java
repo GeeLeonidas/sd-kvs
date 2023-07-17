@@ -106,8 +106,11 @@ public class Servidor {
                             synchronized (nonLeadersToSendReplication) {
                                 nonLeadersToSendReplication.put(info, new HashSet<>());
                             }
-                        } else if (firstMsg.code != Mensagem.Code.CLIENT_HERE)
+                        } else if (firstMsg.code != Mensagem.Code.CLIENT_HERE) {
+                            clientSocket.close();
                             return;
+                        }
+
                         HashMap<String, Runnable> putOkEvents = new HashMap<>();
                         while (!clientSocket.isClosed()) {
                             if (in.available() == 0) { // Caso não tenha recebido mensagem
@@ -224,11 +227,91 @@ public class Servidor {
         }
 
         // Não é líder
-        while (!serverSocket.isClosed()) {
-            final Socket clientSocket = serverSocket.accept();
-            new Thread(() -> {
-                // TODO: Non-leader implementation
-            }).start();
+        final Socket leaderSocket = new Socket(leaderAddress, leaderPort);
+        try (
+                final ObjectInputStream leaderIn = new ObjectInputStream(leaderSocket.getInputStream());
+                final ObjectOutputStream leaderOut = new ObjectOutputStream(leaderSocket.getOutputStream())
+        ) {
+            leaderOut.writeObject(new Mensagem(
+                    Mensagem.Code.SERVER_HERE,
+                    null,
+                    null,
+                    -1
+            ));
+            while (!serverSocket.isClosed()) {
+                final Socket clientSocket = serverSocket.accept();
+                new Thread(() -> {
+                    try (
+                            final ObjectInputStream in = new ObjectInputStream(clientSocket.getInputStream());
+                            final ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream())
+                    ) {
+                        final Mensagem firstMsg = (Mensagem) in.readObject();
+                        if (firstMsg.code != Mensagem.Code.CLIENT_HERE) {
+                            clientSocket.close();
+                            return;
+                        }
+
+                        while (!clientSocket.isClosed()) {
+                            if (in.available() == 0) { // Caso não tenha recebido mensagem de um cliente
+                                // TODO: Leader input handling
+                                try {
+                                    in.wait(0, 5000); // Delay de cinco microsegundos para evitar consumo de CPU
+                                } catch (InterruptedException ignored) {}
+                                continue;
+                            }
+
+                            final Mensagem msg = (Mensagem) in.readObject();
+                            switch (msg.code) {
+                                case PUT:
+                                    synchronized (leaderOut) {
+                                        leaderOut.writeObject(msg);
+                                    }
+                                    break;
+                                case GET:
+                                    synchronized (data) {
+                                        if (!data.containsKey(msg.key)) {
+                                            if (msg.timestamp >= 0) {
+                                                out.writeObject(new Mensagem(
+                                                        Mensagem.Code.TRY_OTHER_SERVER_OR_LATER,
+                                                        msg.key,
+                                                        null,
+                                                        msg.timestamp
+                                                ));
+                                                break;
+                                            }
+                                            out.writeObject(new Mensagem(
+                                                    Mensagem.Code.GET,
+                                                    msg.key,
+                                                    null,
+                                                    msg.timestamp
+                                            ));
+                                            break;
+                                        }
+                                        TimestampedValue<String> entry = data.get(msg.key);
+                                        if (entry.timestamp < msg.timestamp) {
+                                            out.writeObject(new Mensagem(
+                                                    Mensagem.Code.TRY_OTHER_SERVER_OR_LATER,
+                                                    msg.key,
+                                                    null,
+                                                    msg.timestamp
+                                            ));
+                                            break;
+                                        }
+                                        out.writeObject(new Mensagem(
+                                                Mensagem.Code.GET,
+                                                msg.key,
+                                                entry.value,
+                                                entry.timestamp
+                                        ));
+                                    }
+                                default:
+                            }
+                        }
+                    } catch (IOException | ClassNotFoundException exception) {
+                        throw new RuntimeException(exception);
+                    }
+                }).start();
+            }
         }
     }
 }
