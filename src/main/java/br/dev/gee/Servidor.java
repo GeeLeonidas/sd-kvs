@@ -8,8 +8,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Scanner;
 
 public class Servidor {
@@ -83,9 +83,9 @@ public class Servidor {
 
         // É líder
         if (selfAddress.equals(leaderAddress) && selfPort == leaderPort) {
-            final ArrayList<NetworkInfo> nonLeaders = new ArrayList<>();
-            final HashMap<NetworkInfo, ArrayList<String>> nonLeadersOutdatedKeys = new HashMap<>();
-            final HashMap<NetworkInfo, ArrayList<String>> nonLeadersToSendReplication = new HashMap<>();
+            final HashSet<NetworkInfo> nonLeaders = new HashSet<>();
+            final HashMap<NetworkInfo, HashSet<String>> nonLeadersOutdatedKeys = new HashMap<>();
+            final HashMap<NetworkInfo, HashSet<String>> nonLeadersToSendReplication = new HashMap<>();
 
             while (!serverSocket.isClosed()) {
                 final Socket clientSocket = serverSocket.accept();
@@ -101,102 +101,22 @@ public class Servidor {
                                 nonLeaders.add(info);
                             }
                             synchronized (nonLeadersOutdatedKeys) {
-                                nonLeadersOutdatedKeys.put(info, new ArrayList<>());
+                                nonLeadersOutdatedKeys.put(info, new HashSet<>());
                             }
                             synchronized (nonLeadersToSendReplication) {
-                                nonLeadersToSendReplication.put(info, new ArrayList<>());
+                                nonLeadersToSendReplication.put(info, new HashSet<>());
                             }
                         } else if (firstMsg.code != Mensagem.Code.CLIENT_HERE)
                             return;
-
+                        HashMap<String, Runnable> putOkEvents = new HashMap<>();
                         while (!clientSocket.isClosed()) {
-                            final Mensagem msg = (Mensagem) in.readObject();
-                            switch (msg.code) {
-                                case PUT:
-                                    synchronized (nonLeaders) {
-                                        for (NetworkInfo nonLeader : nonLeaders) {
-                                            synchronized (nonLeadersOutdatedKeys) {
-                                                ArrayList<String> list = nonLeadersOutdatedKeys.get(nonLeader);
-                                                list.add(msg.key);
-                                                nonLeadersOutdatedKeys.put(nonLeader, list);
-                                            }
-                                            synchronized (nonLeadersToSendReplication) {
-                                                final ArrayList<String> list = nonLeadersToSendReplication.get(nonLeader);
-                                                list.add(msg.key);
-                                                nonLeadersToSendReplication.put(nonLeader, list);
-                                            }
-                                        }
-                                    }
-                                    synchronized (data) {
-                                        final TimestampedValue<String> timestampedValue = new TimestampedValue<>(msg.value);
-                                        data.put(msg.key, timestampedValue);
-                                    }
-                                    new Thread(() -> {
-                                        while (true) {
-                                            try {
-                                                Thread.sleep(1);
-                                            } catch (InterruptedException ignored) {}
-                                            synchronized (nonLeadersOutdatedKeys) {
-                                                boolean shouldQuit = true;
-                                                for (NetworkInfo serverInfo : nonLeadersOutdatedKeys.keySet()) {
-                                                    ArrayList<String> list = nonLeadersOutdatedKeys.get(serverInfo);
-                                                    if (!list.isEmpty() && list.contains(msg.key))
-                                                        shouldQuit = false;
-                                                }
-                                                if (shouldQuit)
-                                                    break;
-                                            }
-                                        }
-                                        try {
-                                            synchronized (out) {
-                                                synchronized (data) {
-                                                    out.writeObject(new Mensagem(
-                                                            Mensagem.Code.PUT_OK,
-                                                            msg.key,
-                                                            null,
-                                                            data.get(msg.key).timestamp
-                                                    ));
-                                                }
-                                            }
-                                        } catch (IOException exception) {
-                                            throw new RuntimeException(exception);
-                                        }
-                                    }).start();
-                                    break;
-                                case GET:
-                                    synchronized (data) {
-                                        final TimestampedValue<String> timestampedValue = data.getOrDefault(msg.key, null);
-                                        final String value = (timestampedValue != null && timestampedValue.timestamp >= msg.timestamp)?
-                                                timestampedValue.value : null;
-                                        final long timestamp = (value != null)?
-                                                timestampedValue.timestamp : msg.timestamp;
-                                        synchronized (out) {
-                                            out.writeObject(new Mensagem(
-                                                    Mensagem.Code.GET,
-                                                    msg.key,
-                                                    value,
-                                                    timestamp
-                                            ));
-                                        }
-                                    }
-                                    break;
-                                case REPLICATION_OK:
-                                    if (firstMsg.code == Mensagem.Code.CLIENT_HERE)
-                                        break;
-                                    synchronized (nonLeadersOutdatedKeys) {
-                                        final ArrayList<String> list = nonLeadersOutdatedKeys.get(info);
-                                        list.remove(msg.key);
-                                        nonLeadersOutdatedKeys.put(info, list);
-                                    }
-                                default:
-                            }
-                            synchronized (nonLeadersToSendReplication) {
-                                final ArrayList<String> list = nonLeadersToSendReplication.get(info);
-                                if (firstMsg.code == Mensagem.Code.SERVER_HERE && !list.isEmpty()) {
-                                    for (String key : list) {
-                                        synchronized (data) {
-                                            TimestampedValue<String> entry = data.get(key);
-                                            synchronized (out) {
+                            if (in.available() == 0) { // Caso não tenha recebido mensagem
+                                synchronized (nonLeadersToSendReplication) {
+                                    final HashSet<String> set = nonLeadersToSendReplication.get(info);
+                                    if (firstMsg.code == Mensagem.Code.SERVER_HERE && !set.isEmpty()) {
+                                        for (String key : set) {
+                                            synchronized (data) {
+                                                TimestampedValue<String> entry = data.get(key);
                                                 out.writeObject(new Mensagem(
                                                         Mensagem.Code.REPLICATION,
                                                         key,
@@ -205,10 +125,94 @@ public class Servidor {
                                                 ));
                                             }
                                         }
+                                        set.clear();
+                                        nonLeadersToSendReplication.put(info, set);
                                     }
-                                    list.clear();
-                                    nonLeadersToSendReplication.put(info, list);
                                 }
+
+                                for (String key : putOkEvents.keySet()) {
+                                    boolean shouldExecute = true;
+                                    synchronized (nonLeadersOutdatedKeys) {
+                                        for (NetworkInfo nonLeaderInfo : nonLeadersOutdatedKeys.keySet()) {
+                                            HashSet<String> set = nonLeadersOutdatedKeys.get(nonLeaderInfo);
+                                            if (!set.isEmpty() && set.contains(key)) {
+                                                shouldExecute = false;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (shouldExecute) {
+                                        putOkEvents.get(key).run();
+                                        putOkEvents.remove(key);
+                                    }
+                                }
+
+                                try {
+                                    in.wait(0, 5000); // Delay de cinco microsegundos para evitar consumo de CPU
+                                } catch (InterruptedException ignored) {}
+                                continue;
+                            }
+
+                            final Mensagem msg = (Mensagem) in.readObject();
+                            switch (msg.code) {
+                                case PUT:
+                                    synchronized (nonLeaders) {
+                                        for (NetworkInfo nonLeader : nonLeaders) {
+                                            synchronized (nonLeadersOutdatedKeys) {
+                                                HashSet<String> set = nonLeadersOutdatedKeys.get(nonLeader);
+                                                set.add(msg.key);
+                                                nonLeadersOutdatedKeys.put(nonLeader, set);
+                                            }
+                                            synchronized (nonLeadersToSendReplication) {
+                                                final HashSet<String> set = nonLeadersToSendReplication.get(nonLeader);
+                                                set.add(msg.key);
+                                                nonLeadersToSendReplication.put(nonLeader, set);
+                                            }
+                                        }
+                                    }
+                                    synchronized (data) {
+                                        final TimestampedValue<String> timestampedValue = new TimestampedValue<>(msg.value);
+                                        data.put(msg.key, timestampedValue);
+                                    }
+                                    putOkEvents.put(msg.key, () -> {
+                                        synchronized (data) {
+                                            try {
+                                                out.writeObject(new Mensagem(
+                                                        Mensagem.Code.PUT_OK,
+                                                        msg.key,
+                                                        null,
+                                                        data.get(msg.key).timestamp
+                                                ));
+                                            } catch (IOException exception) {
+                                                throw new RuntimeException(exception);
+                                            }
+                                        }
+                                    });
+                                    break;
+                                case GET:
+                                    synchronized (data) {
+                                        final TimestampedValue<String> timestampedValue = data.getOrDefault(msg.key, null);
+                                        final String value = (timestampedValue != null && timestampedValue.timestamp >= msg.timestamp)?
+                                                timestampedValue.value : null;
+                                        final long timestamp = (value != null)?
+                                                timestampedValue.timestamp : msg.timestamp;
+                                        out.writeObject(new Mensagem(
+                                                Mensagem.Code.GET,
+                                                msg.key,
+                                                value,
+                                                timestamp
+                                        ));
+                                    }
+                                    break;
+                                case REPLICATION_OK:
+                                    if (firstMsg.code == Mensagem.Code.CLIENT_HERE)
+                                        break;
+                                    synchronized (nonLeadersOutdatedKeys) {
+                                        final HashSet<String> set = nonLeadersOutdatedKeys.get(info);
+                                        set.remove(msg.key);
+                                        nonLeadersOutdatedKeys.put(info, set);
+                                    }
+                                default:
                             }
                         }
                     } catch (IOException | ClassNotFoundException exception) {
