@@ -123,43 +123,43 @@ public class Servidor {
 
                         HashMap<String, Runnable> putOkEvents = new HashMap<>();
                         while (!clientSocket.isClosed()) {
+                            synchronized (nonLeadersToSendReplication) {
+                                final HashSet<String> set = nonLeadersToSendReplication.get(info);
+                                if (firstMsg.code == Mensagem.Code.SERVER_HERE && !set.isEmpty()) {
+                                    for (String key : set) {
+                                        synchronized (data) {
+                                            TimestampedValue<String> entry = data.get(key);
+                                            out.writeObject(new Mensagem(
+                                                    Mensagem.Code.REPLICATION,
+                                                    key,
+                                                    entry.value,
+                                                    entry.timestamp
+                                            ));
+                                        }
+                                    }
+                                    set.clear();
+                                    nonLeadersToSendReplication.put(info, set);
+                                }
+                            }
+
+                            for (String key : putOkEvents.keySet()) {
+                                boolean shouldExecute = true;
+                                synchronized (nonLeadersOutdatedKeys) {
+                                    for (NetworkInfo nonLeaderInfo : nonLeadersOutdatedKeys.keySet()) {
+                                        HashSet<String> set = nonLeadersOutdatedKeys.get(nonLeaderInfo);
+                                        if (!set.isEmpty() && set.contains(key)) {
+                                            shouldExecute = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (shouldExecute) {
+                                    putOkEvents.get(key).run();
+                                    putOkEvents.remove(key);
+                                }
+                            }
+
                             if (in.available() == 0) { // Caso não tenha recebido mensagem
-                                synchronized (nonLeadersToSendReplication) {
-                                    final HashSet<String> set = nonLeadersToSendReplication.get(info);
-                                    if (firstMsg.code == Mensagem.Code.SERVER_HERE && !set.isEmpty()) {
-                                        for (String key : set) {
-                                            synchronized (data) {
-                                                TimestampedValue<String> entry = data.get(key);
-                                                out.writeObject(new Mensagem(
-                                                        Mensagem.Code.REPLICATION,
-                                                        key,
-                                                        entry.value,
-                                                        entry.timestamp
-                                                ));
-                                            }
-                                        }
-                                        set.clear();
-                                        nonLeadersToSendReplication.put(info, set);
-                                    }
-                                }
-
-                                for (String key : putOkEvents.keySet()) {
-                                    boolean shouldExecute = true;
-                                    synchronized (nonLeadersOutdatedKeys) {
-                                        for (NetworkInfo nonLeaderInfo : nonLeadersOutdatedKeys.keySet()) {
-                                            HashSet<String> set = nonLeadersOutdatedKeys.get(nonLeaderInfo);
-                                            if (!set.isEmpty() && set.contains(key)) {
-                                                shouldExecute = false;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if (shouldExecute) {
-                                        putOkEvents.get(key).run();
-                                        putOkEvents.remove(key);
-                                    }
-                                }
-
                                 try {
                                     in.wait(0, 5000); // Delay de cinco microsegundos para evitar consumo de CPU
                                 } catch (InterruptedException ignored) {}
@@ -204,16 +204,21 @@ public class Servidor {
                                     break;
                                 case GET:
                                     synchronized (data) {
-                                        final TimestampedValue<String> timestampedValue = data.getOrDefault(msg.key, null);
-                                        final String value = (timestampedValue != null && timestampedValue.timestamp >= msg.timestamp)?
-                                                timestampedValue.value : null;
-                                        final long timestamp = (value != null)?
-                                                timestampedValue.timestamp : msg.timestamp;
+                                        if (!data.containsKey(msg.key)) {
+                                            out.writeObject(new Mensagem(
+                                                    Mensagem.Code.GET,
+                                                    msg.key,
+                                                    null,
+                                                    msg.timestamp
+                                            ));
+                                            break;
+                                        }
+                                        TimestampedValue<String> entry = data.get(msg.key);
                                         out.writeObject(new Mensagem(
                                                 Mensagem.Code.GET,
                                                 msg.key,
-                                                value,
-                                                timestamp
+                                                entry.value,
+                                                entry.timestamp
                                         ));
                                     }
                                     break;
