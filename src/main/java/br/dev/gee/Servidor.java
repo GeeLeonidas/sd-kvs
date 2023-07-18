@@ -21,6 +21,11 @@ public class Servidor {
             this.timestamp = Instant.now().toEpochMilli();
             this.value = value;
         }
+
+        public TimestampedValue(T value, long timestamp) {
+            this.timestamp = timestamp;
+            this.value = value;
+        }
     }
 
     public static class NetworkInfo {
@@ -35,6 +40,11 @@ public class Servidor {
         @Override
         public String toString() {
             return String.format("%s:%d", this.address.getHostAddress(), this.port);
+        }
+
+        @Override
+        public int hashCode() {
+            return this.toString().hashCode();
         }
     }
 
@@ -232,12 +242,52 @@ public class Servidor {
                 final ObjectInputStream leaderIn = new ObjectInputStream(leaderSocket.getInputStream());
                 final ObjectOutputStream leaderOut = new ObjectOutputStream(leaderSocket.getOutputStream())
         ) {
+            final HashMap<String, HashSet<NetworkInfo>> putOkInterestedClients = new HashMap<>();
+            final HashMap<Mensagem, HashSet<NetworkInfo>> toBeSentPutOks = new HashMap<>();
+
             leaderOut.writeObject(new Mensagem(
                     Mensagem.Code.SERVER_HERE,
                     null,
                     null,
                     -1
             ));
+            new Thread(() -> { // Recebimento das mensagens do líder
+                try {
+                    while (!leaderSocket.isClosed()) {
+                        Mensagem msg = (Mensagem) leaderIn.readObject();
+                        switch (msg.code) {
+                            case REPLICATION:
+                                synchronized (data) {
+                                    data.put(msg.key, new TimestampedValue<>(msg.value, msg.timestamp));
+                                }
+                                synchronized (leaderOut) {
+                                    leaderOut.writeObject(new Mensagem(
+                                            Mensagem.Code.REPLICATION_OK,
+                                            msg.key,
+                                            null,
+                                            msg.timestamp
+                                    ));
+                                }
+                                break;
+                            case PUT_OK:
+                                synchronized (toBeSentPutOks) {
+                                    synchronized (putOkInterestedClients) {
+                                        toBeSentPutOks.put(new Mensagem(
+                                                Mensagem.Code.PUT_OK,
+                                                msg.key,
+                                                null,
+                                                msg.timestamp
+                                        ), putOkInterestedClients.get(msg.key));
+                                    }
+                                }
+                                break;
+                            default:
+                        }
+                    }
+                } catch (IOException | ClassNotFoundException e) {
+                    throw new RuntimeException(e);
+                }
+            }).start();
             while (!serverSocket.isClosed()) {
                 final Socket clientSocket = serverSocket.accept();
                 new Thread(() -> {
@@ -245,6 +295,7 @@ public class Servidor {
                             final ObjectInputStream in = new ObjectInputStream(clientSocket.getInputStream());
                             final ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream())
                     ) {
+                        final NetworkInfo info = new NetworkInfo(clientSocket.getInetAddress(), clientSocket.getPort());
                         final Mensagem firstMsg = (Mensagem) in.readObject();
                         if (firstMsg.code != Mensagem.Code.CLIENT_HERE) {
                             clientSocket.close();
@@ -252,8 +303,15 @@ public class Servidor {
                         }
 
                         while (!clientSocket.isClosed()) {
-                            if (in.available() == 0) { // Caso não tenha recebido mensagem de um cliente
-                                // TODO: Leader input handling
+                            synchronized (toBeSentPutOks) {
+                                for (Mensagem msg : toBeSentPutOks.keySet()) {
+                                    HashSet<NetworkInfo> set = toBeSentPutOks.getOrDefault(msg, new HashSet<>());
+                                    if (set.contains(info))
+                                        out.writeObject(msg);
+                                }
+                            }
+
+                            if (in.available() == 0) { // Caso não tenha recebido a mensagem de um cliente
                                 try {
                                     in.wait(0, 5000); // Delay de cinco microsegundos para evitar consumo de CPU
                                 } catch (InterruptedException ignored) {}
@@ -265,6 +323,11 @@ public class Servidor {
                                 case PUT:
                                     synchronized (leaderOut) {
                                         leaderOut.writeObject(msg);
+                                    }
+                                    synchronized (putOkInterestedClients) {
+                                        HashSet<NetworkInfo> set = putOkInterestedClients.getOrDefault(msg.key, new HashSet<>());
+                                        set.add(info);
+                                        putOkInterestedClients.put(msg.key, set);
                                     }
                                     break;
                                 case GET:
