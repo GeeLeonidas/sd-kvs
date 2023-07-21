@@ -5,11 +5,23 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.InetAddress;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Random;
 import java.util.Scanner;
 
 public class Cliente {
     public static void main(String[] args) throws IOException, ClassNotFoundException {
         final Scanner scanner = new Scanner(System.in);
+        final ArrayList<Servidor.NetworkInfo> availableServers = new ArrayList<>();
+        final HashMap<String, Long> lastTimestamps = new HashMap<>();
+
+        for (int i = 1; i <= 3; i++)
+            availableServers.add(new Servidor.NetworkInfo(
+                    Servidor.readAddress(scanner, "Servidor " + i),
+                    Servidor.readPort(scanner, "Servidor " + i)
+            ));
+        final Random rand = new Random();
 
         InetAddress serverAddress = null;
         int serverPort = -1;
@@ -22,8 +34,10 @@ public class Cliente {
         while (!option.equals("EXIT")) {
             switch (option) {
                 case "INIT":
-                    serverAddress = Servidor.readAddress(scanner, "Servidor");
-                    serverPort = Servidor.readPort(scanner, "Servidor");
+                    final Servidor.NetworkInfo randomServer = availableServers.get(rand.nextInt(3));
+                    System.out.printf("Servidor selecionado aleatoriamente: %s\n", randomServer);
+                    serverAddress = randomServer.address;
+                    serverPort = randomServer.port;
                     if (serverSocket != null)
                         serverSocket.close();
                     serverSocket = new Socket(serverAddress, serverPort);
@@ -52,7 +66,7 @@ public class Cliente {
                             -1
                     ));
                     Mensagem msg = (Mensagem) in.readObject();
-                    if (msg.code == Mensagem.Code.PUT_OK)
+                    if (msg.code == Mensagem.Code.PUT_OK) {
                         System.out.printf(
                                 "PUT_OK key: %s value %s timestamp %d realizada no servidor %s:%d\n",
                                 msg.key,
@@ -61,6 +75,8 @@ public class Cliente {
                                 serverAddress,
                                 serverPort
                         );
+                        lastTimestamps.put(msg.key, msg.timestamp);
+                    }
                     break;
                 case "GET":
                     if (serverSocket == null || serverSocket.isClosed()) {
@@ -69,8 +85,7 @@ public class Cliente {
                     }
                     System.out.print("Insira a chave: ");
                     final String key2 = scanner.nextLine();
-                    System.out.print("Insira o timestamp: ");
-                    final long timestamp = Long.parseLong(scanner.nextLine());
+                    final long timestamp = lastTimestamps.getOrDefault(key2, 0L);
                     out.writeObject(new Mensagem(
                             Mensagem.Code.GET,
                             key2,
