@@ -202,20 +202,23 @@ public class Servidor {
                                         putOkEvents.put(msg.key, () -> {
                                             synchronized (data) {
                                                 try {
+                                                    final long timestamp = data.get(msg.key).timestamp;
                                                     synchronized (out) {
                                                         out.writeObject(new Mensagem(
                                                                 Mensagem.Code.PUT_OK,
                                                                 msg.key,
                                                                 null,
-                                                                data.get(msg.key).timestamp
+                                                                timestamp
                                                         ));
                                                     }
+                                                    System.out.printf("Enviando PUT_OK ao Cliente %s da key:%s ts:%d\n", info, msg.key, timestamp);
                                                 } catch (IOException exception) {
                                                     throw new RuntimeException(exception);
                                                 }
                                             }
                                         });
                                     }
+                                    System.out.printf("Cliente %s PUT key:%s value:%s\n", info, msg.key, msg.value);
                                     break;
                                 case GET:
                                     synchronized (data) {
@@ -228,6 +231,12 @@ public class Servidor {
                                                         msg.timestamp
                                                 ));
                                             }
+                                            System.out.printf(
+                                                    "Cliente %s GET key:%s ts:%d. Meu ts é -1, portanto devolvendo null\n",
+                                                    info,
+                                                    msg.key,
+                                                    msg.timestamp
+                                            );
                                             break;
                                         }
                                         TimestampedValue<String> entry = data.get(msg.key);
@@ -239,6 +248,14 @@ public class Servidor {
                                                     entry.timestamp
                                             ));
                                         }
+                                        System.out.printf(
+                                                "Cliente %s GET key:%s ts:%d. Meu ts é %d, portanto devolvendo %s\n",
+                                                info,
+                                                msg.key,
+                                                msg.timestamp,
+                                                entry.timestamp,
+                                                entry.value
+                                        );
                                     }
                                     break;
                                 case REPLICATION_OK:
@@ -292,6 +309,7 @@ public class Servidor {
                                             msg.timestamp
                                     ));
                                 }
+                                System.out.printf("REPLICATION key:%s value:%s ts:%d\n", msg.key, msg.value, msg.timestamp);
                                 break;
                             case PUT_OK:
                                 synchronized (toBeSentPutOks) {
@@ -336,7 +354,12 @@ public class Servidor {
                                                 synchronized (out) {
                                                     out.writeObject(msg);
                                                 }
+                                                set.remove(info);
                                             }
+                                            if (set.isEmpty())
+                                                toBeSentPutOks.remove(msg);
+                                            else
+                                                toBeSentPutOks.put(msg, set);
                                         }
                                     }
                                     try {
@@ -359,10 +382,17 @@ public class Servidor {
                                         set.add(info);
                                         putOkInterestedClients.put(msg.key, set);
                                     }
+                                    System.out.printf("Encaminhando PUT key:%s value:%s\n", msg.key, msg.value);
                                     break;
                                 case GET:
                                     synchronized (data) {
                                         if (!data.containsKey(msg.key)) {
+                                            System.out.printf(
+                                                    "Cliente %s GET key:%s ts:%d. Meu ts é -1, portanto devolvendo null\n",
+                                                    info,
+                                                    msg.key,
+                                                    msg.timestamp
+                                            );
                                             if (msg.timestamp >= 0) {
                                                 synchronized (out) {
                                                     out.writeObject(new Mensagem(
@@ -394,6 +424,13 @@ public class Servidor {
                                                         msg.timestamp
                                                 ));
                                             }
+                                            System.out.printf(
+                                                    "Cliente %s GET key:%s ts:%d. Meu ts é %d, portanto devolvendo null\n",
+                                                    info,
+                                                    msg.key,
+                                                    msg.timestamp,
+                                                    entry.timestamp
+                                            );
                                             break;
                                         }
                                         synchronized (out) {
@@ -404,6 +441,14 @@ public class Servidor {
                                                     entry.timestamp
                                             ));
                                         }
+                                        System.out.printf(
+                                                "Cliente %s GET key:%s ts:%d. Meu ts é %d, portanto devolvendo %s\n",
+                                                info,
+                                                msg.key,
+                                                msg.timestamp,
+                                                entry.timestamp,
+                                                entry.value
+                                        );
                                     }
                                 default:
                             }
