@@ -85,8 +85,10 @@ public class Servidor {
 
     public static void main(String[] args) throws IOException {
         final Scanner scanner = new Scanner(System.in);
+        // Entrada dos dados do servidor atual
         final InetAddress selfAddress = readAddress(scanner, "Host");
         final int selfPort = readPort(scanner, "Host");
+        // Entrada dos dados do servidor líder
         final InetAddress leaderAddress = readAddress(scanner, "Líder");
         final int leaderPort = readPort(scanner, "Líder");
         scanner.close();
@@ -102,6 +104,7 @@ public class Servidor {
 
             while (!serverSocket.isClosed()) {
                 final Socket clientSocket = serverSocket.accept();
+                // Uso do 'Socket' feito por outra Thread, principal apenas escuta 'serverSocket'
                 new Thread(() -> {
                     try (
                             final ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
@@ -110,6 +113,7 @@ public class Servidor {
                         final NetworkInfo info = new NetworkInfo(clientSocket.getInetAddress(), clientSocket.getPort());
                         final Mensagem firstMsg = (Mensagem) in.readObject();
                         if (firstMsg.code == Mensagem.Code.SERVER_HERE) {
+                            // Conexão trata-se de outro servidor
                             synchronized (nonLeaders) {
                                 nonLeaders.add(info);
                             }
@@ -120,6 +124,7 @@ public class Servidor {
                                 nonLeadersToSendReplication.put(info, new HashSet<>());
                             }
                         } else if (firstMsg.code != Mensagem.Code.CLIENT_HERE) {
+                            // Conexão trata-se de um cliente
                             clientSocket.close();
                             return;
                         }
@@ -128,6 +133,7 @@ public class Servidor {
                         new Thread(() -> { // Execução em segundo plano
                             try {
                                 while (!clientSocket.isClosed()) {
+                                    // Envia 'REPLICATION' caso o servidor conectado esteja marcado como interessado
                                     synchronized (nonLeadersToSendReplication) {
                                         final HashSet<String> set = nonLeadersToSendReplication.get(info);
                                         if (firstMsg.code == Mensagem.Code.SERVER_HERE && !set.isEmpty()) {
@@ -151,17 +157,20 @@ public class Servidor {
 
                                     synchronized (putOkEvents) {
                                         for (String key : putOkEvents.keySet()) {
+                                            // Verifica se todos os outros servidores estão atualizados
                                             boolean shouldExecute = true;
                                             synchronized (nonLeadersOutdatedKeys) {
                                                 for (NetworkInfo nonLeaderInfo : nonLeadersOutdatedKeys.keySet()) {
                                                     HashSet<String> set = nonLeadersOutdatedKeys.get(nonLeaderInfo);
                                                     if (!set.isEmpty() && set.contains(key)) {
+                                                        // Um servidor ainda está desatualizado
                                                         shouldExecute = false;
                                                         break;
                                                     }
                                                 }
                                             }
                                             if (shouldExecute) {
+                                                // Executa o envio de 'PUT_OK' e o consome
                                                 putOkEvents.get(key).run();
                                                 putOkEvents.remove(key);
                                             }
@@ -180,6 +189,7 @@ public class Servidor {
                             final Mensagem msg = (Mensagem) in.readObject();
                             switch (msg.code) {
                                 case PUT:
+                                    // Marca todos os outros servidores como desatualizados e interessados em receber 'REPLICATION'
                                     synchronized (nonLeaders) {
                                         for (NetworkInfo nonLeader : nonLeaders) {
                                             synchronized (nonLeadersOutdatedKeys) {
@@ -194,10 +204,12 @@ public class Servidor {
                                             }
                                         }
                                     }
+                                    // Atribua valor à chave 'msg.key' na tabela hash 'data'
                                     synchronized (data) {
                                         final TimestampedValue<String> timestampedValue = new TimestampedValue<>(msg.value);
                                         data.put(msg.key, timestampedValue);
                                     }
+                                    // Agende uma execução do envio de 'PUT_OK' para ser consumida no futuro
                                     synchronized (putOkEvents) {
                                         putOkEvents.put(msg.key, () -> {
                                             synchronized (data) {
@@ -223,6 +235,7 @@ public class Servidor {
                                 case GET:
                                     synchronized (data) {
                                         if (!data.containsKey(msg.key)) {
+                                            // Devolve 'null' por não possuir a chave
                                             synchronized (out) {
                                                 out.writeObject(new Mensagem(
                                                         Mensagem.Code.GET,
@@ -240,6 +253,7 @@ public class Servidor {
                                             break;
                                         }
                                         TimestampedValue<String> entry = data.get(msg.key);
+                                        // Devolve 'entry.value' caso o cliente informe um timestamp menor ou igual ao disponível
                                         synchronized (out) {
                                             out.writeObject(new Mensagem(
                                                     Mensagem.Code.GET,
@@ -261,6 +275,7 @@ public class Servidor {
                                 case REPLICATION_OK:
                                     if (firstMsg.code == Mensagem.Code.CLIENT_HERE)
                                         break;
+                                    // Remove o servidor do conjunto de desatualizados
                                     synchronized (nonLeadersOutdatedKeys) {
                                         final HashSet<String> set = nonLeadersOutdatedKeys.get(info);
                                         set.remove(msg.key);
@@ -298,9 +313,11 @@ public class Servidor {
                         Mensagem msg = (Mensagem) leaderIn.readObject();
                         switch (msg.code) {
                             case REPLICATION:
+                                // Recebe a requisição REPLICATION e atualiza a tabela hash
                                 synchronized (data) {
                                     data.put(msg.key, new TimestampedValue<>(msg.value, msg.timestamp));
                                 }
+                                // Envia REPLICATION_OK como resposta
                                 synchronized (leaderOut) {
                                     leaderOut.writeObject(new Mensagem(
                                             Mensagem.Code.REPLICATION_OK,
@@ -312,6 +329,7 @@ public class Servidor {
                                 System.out.printf("REPLICATION key:%s value:%s ts:%d\n", msg.key, msg.value, msg.timestamp);
                                 break;
                             case PUT_OK:
+                                // Agenda uma mensagem PUT_OK para ser enviada aos clientes interessados
                                 synchronized (toBeSentPutOks) {
                                     synchronized (putOkInterestedClients) {
                                         toBeSentPutOks.put(new Mensagem(
@@ -332,6 +350,7 @@ public class Servidor {
             }).start();
             while (!serverSocket.isClosed()) {
                 final Socket clientSocket = serverSocket.accept();
+                // Uso do 'Socket' feito por outra Thread, principal apenas escuta 'serverSocket'
                 new Thread(() -> {
                     try (
                             final ObjectOutputStream out = new ObjectOutputStream(clientSocket.getOutputStream());
@@ -348,9 +367,11 @@ public class Servidor {
                             try {
                                 while (!clientSocket.isClosed()) {
                                     synchronized (toBeSentPutOks) {
+                                        // Para cada mensagem, cheque se este cliente está interessado
                                         for (Mensagem msg : toBeSentPutOks.keySet()) {
                                             HashSet<NetworkInfo> set = toBeSentPutOks.getOrDefault(msg, new HashSet<>());
                                             if (set.contains(info)) {
+                                                // Envio da mensagem PUT_OK ao cliente
                                                 synchronized (out) {
                                                     out.writeObject(msg);
                                                 }
@@ -374,9 +395,11 @@ public class Servidor {
                             final Mensagem msg = (Mensagem) in.readObject();
                             switch (msg.code) {
                                 case PUT:
+                                    // Encaminha requisição PUT ao líder
                                     synchronized (leaderOut) {
                                         leaderOut.writeObject(msg);
                                     }
+                                    // Sinaliza que o cliente está interessado na resposta PUT_OK atrelada à 'msg.key'
                                     synchronized (putOkInterestedClients) {
                                         HashSet<NetworkInfo> set = putOkInterestedClients.getOrDefault(msg.key, new HashSet<>());
                                         set.add(info);
@@ -387,7 +410,9 @@ public class Servidor {
                                 case GET:
                                     synchronized (data) {
                                         if (!data.containsKey(msg.key)) {
+                                            // O servidor não possui a chave requisitada pelo cliente
                                             if (msg.timestamp > 0) {
+                                                // Devolve 'TRY_OTHER_SERVER_OR_LATER' caso o cliente informe um timestamp válido (> 0)
                                                 synchronized (out) {
                                                     out.writeObject(new Mensagem(
                                                             Mensagem.Code.TRY_OTHER_SERVER_OR_LATER,
@@ -404,6 +429,7 @@ public class Servidor {
                                                 );
                                                 break;
                                             }
+                                            // Devolve 'null' caso seja um timestamp placeholder (<= 0)
                                             synchronized (out) {
                                                 out.writeObject(new Mensagem(
                                                         Mensagem.Code.GET,
@@ -422,6 +448,7 @@ public class Servidor {
                                         }
                                         TimestampedValue<String> entry = data.get(msg.key);
                                         if (entry.timestamp < msg.timestamp) {
+                                            // Devolve 'TRY_OTHER_SERVER_OR_LATER' caso o cliente informe um timestamp menor que o disponível
                                             synchronized (out) {
                                                 out.writeObject(new Mensagem(
                                                         Mensagem.Code.TRY_OTHER_SERVER_OR_LATER,
@@ -439,6 +466,7 @@ public class Servidor {
                                             );
                                             break;
                                         }
+                                        // Devolve 'entry.value' caso o cliente informe um timestamp menor ou igual ao disponível
                                         synchronized (out) {
                                             out.writeObject(new Mensagem(
                                                     Mensagem.Code.GET,

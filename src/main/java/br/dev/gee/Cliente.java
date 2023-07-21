@@ -16,6 +16,7 @@ public class Cliente {
         final ArrayList<Servidor.NetworkInfo> availableServers = new ArrayList<>();
         final HashMap<String, Long> lastTimestamps = new HashMap<>();
 
+        // Inicialização parcial
         for (int i = 1; i <= 3; i++)
             availableServers.add(new Servidor.NetworkInfo(
                     Servidor.readAddress(scanner, "Servidor " + i),
@@ -34,6 +35,7 @@ public class Cliente {
         while (!option.equals("EXIT")) {
             switch (option) {
                 case "INIT":
+                    // Inicialização completa (servidor escolhido de forma aleatória)
                     final Servidor.NetworkInfo randomServer = availableServers.get(rand.nextInt(3));
                     System.out.printf("Servidor selecionado aleatoriamente: %s\n", randomServer);
                     serverAddress = randomServer.address;
@@ -55,10 +57,12 @@ public class Cliente {
                         System.out.println("Execute INIT primeiro!");
                         break;
                     }
+                    // Inicialização da requisição PUT
                     System.out.print("Insira a chave: ");
                     final String key = scanner.nextLine();
                     System.out.print("Insira o valor: ");
                     final String value = scanner.nextLine();
+                    // Envio da requisição PUT
                     out.writeObject(new Mensagem(
                             Mensagem.Code.PUT,
                             key,
@@ -67,6 +71,7 @@ public class Cliente {
                     ));
                     Mensagem msg = (Mensagem) in.readObject();
                     if (msg.code == Mensagem.Code.PUT_OK) {
+                        // Requisição foi um sucesso
                         System.out.printf(
                                 "PUT_OK key: %s value %s timestamp %d realizada no servidor %s:%d\n",
                                 msg.key,
@@ -83,9 +88,11 @@ public class Cliente {
                         System.out.println("Execute INIT primeiro!");
                         break;
                     }
+                    // Requisição GET
                     System.out.print("Insira a chave: ");
                     final String key2 = scanner.nextLine();
                     final long timestamp = lastTimestamps.getOrDefault(key2, 0L);
+                    // Envio da requisição GET
                     out.writeObject(new Mensagem(
                             Mensagem.Code.GET,
                             key2,
@@ -105,6 +112,7 @@ public class Cliente {
                         );
                 default:
             }
+            // Menu interativo
             System.out.print("Insira uma opção (INIT, PUT, GET): ");
             option = scanner.nextLine().toUpperCase();
         }
