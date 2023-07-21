@@ -232,7 +232,7 @@ public class Servidor {
                                                 ));
                                             }
                                             System.out.printf(
-                                                    "Cliente %s GET key:%s ts:%d. Meu ts é -1, portanto devolvendo null\n",
+                                                    "Cliente %s GET key:%s ts:%d. Meu ts é 0, portanto devolvendo null\n",
                                                     info,
                                                     msg.key,
                                                     msg.timestamp
@@ -290,7 +290,7 @@ public class Servidor {
                     Mensagem.Code.SERVER_HERE,
                     null,
                     null,
-                    -1
+                    0
             ));
             new Thread(() -> { // Recebimento das mensagens do líder
                 try {
@@ -387,13 +387,7 @@ public class Servidor {
                                 case GET:
                                     synchronized (data) {
                                         if (!data.containsKey(msg.key)) {
-                                            System.out.printf(
-                                                    "Cliente %s GET key:%s ts:%d. Meu ts é -1, portanto devolvendo null\n",
-                                                    info,
-                                                    msg.key,
-                                                    msg.timestamp
-                                            );
-                                            if (msg.timestamp >= 0) {
+                                            if (msg.timestamp > 0) {
                                                 synchronized (out) {
                                                     out.writeObject(new Mensagem(
                                                             Mensagem.Code.TRY_OTHER_SERVER_OR_LATER,
@@ -402,6 +396,12 @@ public class Servidor {
                                                             msg.timestamp
                                                     ));
                                                 }
+                                                System.out.printf(
+                                                        "Cliente %s GET key:%s ts:%d. Meu ts é 0, portanto devolvendo TRY_OTHER_SERVER_OR_LATER\n",
+                                                        info,
+                                                        msg.key,
+                                                        msg.timestamp
+                                                );
                                                 break;
                                             }
                                             synchronized (out) {
@@ -412,6 +412,12 @@ public class Servidor {
                                                         msg.timestamp
                                                 ));
                                             }
+                                            System.out.printf(
+                                                    "Cliente %s GET key:%s ts:%d. Meu ts é 0, portanto devolvendo null\n",
+                                                    info,
+                                                    msg.key,
+                                                    msg.timestamp
+                                            );
                                             break;
                                         }
                                         TimestampedValue<String> entry = data.get(msg.key);
@@ -425,7 +431,7 @@ public class Servidor {
                                                 ));
                                             }
                                             System.out.printf(
-                                                    "Cliente %s GET key:%s ts:%d. Meu ts é %d, portanto devolvendo null\n",
+                                                    "Cliente %s GET key:%s ts:%d. Meu ts é %d, portanto devolvendo TRY_OTHER_SERVER_OR_LATER\n",
                                                     info,
                                                     msg.key,
                                                     msg.timestamp,
