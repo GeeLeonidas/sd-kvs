@@ -1,5 +1,6 @@
 package br.dev.gee;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -182,7 +183,8 @@ public class Servidor {
                                     } catch (InterruptedException ignored) {}
                                 }
                             } catch (IOException exception) {
-                                throw new RuntimeException(exception);
+                                if (!(exception instanceof EOFException))
+                                    throw new RuntimeException(exception);
                             }
                         }).start();
                         while (!clientSocket.isClosed()) {
@@ -225,7 +227,8 @@ public class Servidor {
                                                     }
                                                     System.out.printf("Enviando PUT_OK ao Cliente %s da key:%s ts:%d\n", info, msg.key, timestamp);
                                                 } catch (IOException exception) {
-                                                    throw new RuntimeException(exception);
+                                                    if (!(exception instanceof EOFException))
+                                                        throw new RuntimeException(exception);
                                                 }
                                             }
                                         });
@@ -285,7 +288,8 @@ public class Servidor {
                             }
                         }
                     } catch (IOException | ClassNotFoundException exception) {
-                        throw new RuntimeException(exception);
+                        if (!(exception instanceof EOFException))
+                            throw new RuntimeException(exception);
                     }
                 }).start();
             }
@@ -345,7 +349,8 @@ public class Servidor {
                         }
                     }
                 } catch (IOException | ClassNotFoundException e) {
-                    throw new RuntimeException(e);
+                    if (!(e instanceof EOFException))
+                        throw new RuntimeException(e);
                 }
             }).start();
             while (!serverSocket.isClosed()) {
@@ -388,7 +393,8 @@ public class Servidor {
                                     } catch (InterruptedException ignored) {}
                                 }
                             } catch (IOException exception) {
-                                throw new RuntimeException(exception);
+                                if (!(exception instanceof EOFException))
+                                    throw new RuntimeException(exception);
                             }
                         }).start();
                         while (!clientSocket.isClosed()) {
@@ -488,7 +494,8 @@ public class Servidor {
                             }
                         }
                     } catch (IOException | ClassNotFoundException exception) {
-                        throw new RuntimeException(exception);
+                        if (!(exception instanceof EOFException))
+                            throw new RuntimeException(exception);
                     }
                 }).start();
             }
