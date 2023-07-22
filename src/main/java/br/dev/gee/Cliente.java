@@ -100,7 +100,9 @@ public class Cliente {
                             timestamp
                     ));
                     Mensagem msg2 = (Mensagem) in.readObject();
-                    if (msg2.code == Mensagem.Code.GET)
+                    if (msg2.code == Mensagem.Code.GET) {
+                        if (msg2.value != null)
+                            lastTimestamps.put(msg2.key, msg2.timestamp);
                         System.out.printf(
                                 "GET key: %s value: %s obtido do servidor %s:%d, meu timestamp %d e do servidor %d\n",
                                 msg2.key,
@@ -110,6 +112,7 @@ public class Cliente {
                                 timestamp,
                                 msg2.timestamp
                         );
+                    }
                 default:
             }
             // Menu interativo
