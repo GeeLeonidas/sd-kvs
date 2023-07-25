@@ -69,6 +69,9 @@ public class Cliente {
                             value,
                             -1
                     ));
+                    // Atualiza o timestamp lógico espelhando o servidor
+                    lastTimestamps.put(key, lastTimestamps.getOrDefault(key, 0L) + 1L);
+                    // Aguardo da resposta do servidor
                     Mensagem msg = (Mensagem) in.readObject();
                     if (msg.code == Mensagem.Code.PUT_OK) {
                         // Requisição foi um sucesso

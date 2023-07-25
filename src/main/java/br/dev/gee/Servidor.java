@@ -8,21 +8,16 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
-import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Scanner;
+import java.util.concurrent.atomic.AtomicLong;
 
 @SuppressWarnings("BusyWait")
 public class Servidor {
     public static class TimestampedValue<T> {
         public final long timestamp;
         public final T value;
-
-        public TimestampedValue(T value) {
-            this.timestamp = Instant.now().toEpochMilli();
-            this.value = value;
-        }
 
         public TimestampedValue(T value, long timestamp) {
             this.timestamp = timestamp;
@@ -102,6 +97,8 @@ public class Servidor {
             final HashSet<NetworkInfo> nonLeaders = new HashSet<>();
             final HashMap<NetworkInfo, HashSet<String>> nonLeadersOutdatedKeys = new HashMap<>();
             final HashMap<NetworkInfo, HashSet<String>> nonLeadersToSendReplication = new HashMap<>();
+
+            AtomicLong currentTimestamp = new AtomicLong(0L);
 
             while (!serverSocket.isClosed()) {
                 final Socket clientSocket = serverSocket.accept();
@@ -191,24 +188,12 @@ public class Servidor {
                             final Mensagem msg = (Mensagem) in.readObject();
                             switch (msg.code) {
                                 case PUT:
-                                    // Marca todos os outros servidores como desatualizados e interessados em receber 'REPLICATION'
-                                    synchronized (nonLeaders) {
-                                        for (NetworkInfo nonLeader : nonLeaders) {
-                                            synchronized (nonLeadersOutdatedKeys) {
-                                                HashSet<String> set = nonLeadersOutdatedKeys.get(nonLeader);
-                                                set.add(msg.key);
-                                                nonLeadersOutdatedKeys.put(nonLeader, set);
-                                            }
-                                            synchronized (nonLeadersToSendReplication) {
-                                                final HashSet<String> set = nonLeadersToSendReplication.get(nonLeader);
-                                                set.add(msg.key);
-                                                nonLeadersToSendReplication.put(nonLeader, set);
-                                            }
-                                        }
-                                    }
                                     // Atribua valor à chave 'msg.key' na tabela hash 'data'
                                     synchronized (data) {
-                                        final TimestampedValue<String> timestampedValue = new TimestampedValue<>(msg.value);
+                                        final TimestampedValue<String> timestampedValue = new TimestampedValue<>(
+                                                msg.value,
+                                                currentTimestamp.addAndGet(1)
+                                        );
                                         data.put(msg.key, timestampedValue);
                                     }
                                     // Agende uma execução do envio de 'PUT_OK' para ser consumida no futuro
@@ -232,6 +217,21 @@ public class Servidor {
                                                 }
                                             }
                                         });
+                                    }
+                                    // Marca todos os outros servidores como desatualizados e interessados em receber 'REPLICATION'
+                                    synchronized (nonLeaders) {
+                                        for (NetworkInfo nonLeader : nonLeaders) {
+                                            synchronized (nonLeadersOutdatedKeys) {
+                                                HashSet<String> set = nonLeadersOutdatedKeys.get(nonLeader);
+                                                set.add(msg.key);
+                                                nonLeadersOutdatedKeys.put(nonLeader, set);
+                                            }
+                                            synchronized (nonLeadersToSendReplication) {
+                                                final HashSet<String> set = nonLeadersToSendReplication.get(nonLeader);
+                                                set.add(msg.key);
+                                                nonLeadersToSendReplication.put(nonLeader, set);
+                                            }
+                                        }
                                     }
                                     System.out.printf("Cliente %s PUT key:%s value:%s\n", info, msg.key, msg.value);
                                     break;
