@@ -122,7 +122,7 @@ public class Servidor {
                                 nonLeadersToSendReplication.put(info, new HashSet<>());
                             }
                         } else if (firstMsg.code != Mensagem.Code.CLIENT_HERE) {
-                            // Conexão trata-se de um cliente
+                            // Conexão não se trata de um cliente
                             clientSocket.close();
                             return;
                         }
