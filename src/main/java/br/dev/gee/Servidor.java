@@ -309,7 +309,7 @@ public class Servidor {
                     Mensagem.Code.SERVER_HERE,
                     null,
                     null,
-                    0
+                    -1
             ));
             new Thread(() -> { // Recebimento das mensagens do líder
                 try {
