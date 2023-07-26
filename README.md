@@ -1,5 +1,5 @@
 ## Problemas não previstos pelo plano do projeto
-- Não existe forma de verificar a resiliência do servidor e reverter uma alteração de valor/timestamp em caso de falha
+- Não existe forma de verificar a resiliência do servidor e reverter um estado em caso de falha
 
 ## Ambiente utilizado
 - JDK 1.8 (Eclipse Temurin)
