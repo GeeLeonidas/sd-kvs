@@ -9,7 +9,7 @@
 - Executando o comando `gradlew compileJava`, os arquivos .class serão gerados na pasta `build/classes/java/main`
 - Para iniciar o servidor, execute `CLASSPATH="build/classes/java/main" java br.dev.gee.Servidor`
   - Inicialize o servidor inserindo o endereço e a porta em que deseja disponibilizá-lo
-  - Informe qual é o endereço e porta do servidor líder (insira os mesmos valores anteriores caso trate-se do líder)
+  - Informe qual é o endereço e porta do servidor líder (insira os mesmos valores anteriores caso o próprio servidor seja o líder)
 - Para iniciar o cliente, execute `CLASSPATH="build/classes/java/main" java br.dev.gee.Cliente`
   - Insira o endereço e a porta em que o servidor está rodando
   - Escolha uma das quatro opções disponíveis (`INIT`, `PUT`, `GET`, `EXIT`)
